@@ -1,88 +1,109 @@
 import datetime
+import logging
 import json
-import requests
-from collections import defaultdict
-try:
-    from src.external_api import get_exchange_rate
-except ModuleNotFoundError:
-    import sys
-    import os
-    sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-    from src.external_api import get_exchange_rate
+from utils import read_excel_transactions
+from external_api import get_exchange_rate
 
-API_STOCKS_URL = "https://api.apilayer.com/marketstack/v1/eod"  # Пример API для акций
-API_KEY = "YOUR_ACCESS_KEY"  # Вставь свой API-ключ
+# Настроим логирование
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
+# Пути к файлам
+TRANSACTIONS_FILE = "data/operations.xlsx"
 
-def get_greeting():
-    """Определяет время суток и возвращает приветствие"""
-    hour = datetime.datetime.now().hour
-    if 6 <= hour < 12:
-        return "Доброе утро"
-    elif 12 <= hour < 18:
-        return "Добрый день"
-    elif 18 <= hour < 24:
-        return "Добрый вечер"
-    else:
-        return "Доброй ночи"
-
-
-def process_card_data(transactions):
-    """Анализирует данные по картам: последние 4 цифры, расходы, кешбэк"""
-    card_stats = defaultdict(lambda: {"total_spent": 0, "cashback": 0})
+def get_financial_summary(transactions):
+    """
+    Генерирует сводку по финансам (сумма расходов и кешбэк) по последним 4 цифрам карт.
+    """
+    summary = {}
 
     for transaction in transactions:
-        card_number = transaction.get("card_number", "")
-        if len(card_number) >= 4:
-            last_digits = card_number[-4:]
-            amount_rub = transaction.get("amount_rub", 0)
-            card_stats[last_digits]["total_spent"] += amount_rub
-            card_stats[last_digits]["cashback"] = round(card_stats[last_digits]["total_spent"] * 0.01, 2)
+        card = transaction.get("Номер карты", "")
+        amount = transaction.get("Сумма платежа", 0)
 
-    return [{"last_digits": card, **data} for card, data in card_stats.items()]
+        if not isinstance(card, str):
+            card = str(card)
 
+        last_digits = card[-4:] if len(card) >= 4 else "XXXX"
 
-def get_top_transactions(transactions, n=5):
-    """Выбирает топ-5 транзакций по сумме"""
-    sorted_transactions = sorted(transactions, key=lambda x: x["amount_rub"], reverse=True)
-    return sorted_transactions[:n]
+        # Игнорируем возвраты и нулевые платежи
+        if amount <= 0:
+            continue
 
+        if last_digits not in summary:
+            summary[last_digits] = {"total_spent": 0, "cashback": 0}
 
-def get_stock_prices():
-    """Получает цены акций (пример запроса)"""
-    stocks = ["AAPL", "AMZN", "GOOGL", "MSFT", "TSLA"]
-    url = f"{API_STOCKS_URL}?access_key={API_KEY}&symbols={','.join(stocks)}"
+        summary[last_digits]["total_spent"] += amount
+        summary[last_digits]["cashback"] += amount * 0.01  # 1% кешбэк
 
-    response = requests.get(url)
-    data = response.json()
-
-    if "data" in data:
-        return [{"stock": item["symbol"], "price": item["close"]} for item in data["data"]]
-
-    return []
-
-
-def generate_main_page_data(transactions):
-    """Формирует JSON-ответ для главной страницы"""
-    return {
-        "greeting": get_greeting(),
-        "cards": process_card_data(transactions),
-        "top_transactions": get_top_transactions(transactions),
-        "currency_rates": [
-            {"currency": "USD", "rate": get_exchange_rate("USD")},
-            {"currency": "EUR", "rate": get_exchange_rate("EUR")}
-        ],
-        "stock_prices": get_stock_prices()
-    }
-
-
-# Пример использования
-if __name__ == "__main__":
-    transactions = [
-        {"id": 1, "amount_rub": 9975.87, "card_number": "1234567890125814", "date": "2024-02-01"},
-        {"id": 2, "amount_rub": 20588.33, "card_number": "1234567890127512", "date": "2024-02-02"},
-        {"id": 3, "amount_rub": 5000.0, "card_number": "1234567890125814", "date": "2024-02-03"},
+    return [
+        {
+            "last_digits": card if card != "XXXX" else "Неизвестная карта",
+            "total_spent": round(data["total_spent"], 2),
+            "cashback": round(data["cashback"], 2),
+        }
+        for card, data in summary.items()
     ]
 
-    result = generate_main_page_data(transactions)
-    print(json.dumps(result, indent=4, ensure_ascii=False))  # Выводим красиво
+def get_top_transactions(transactions, top_n=5):
+    """
+    Возвращает топ-N транзакций по сумме.
+    """
+    sorted_transactions = sorted(transactions, key=lambda x: x.get("Сумма платежа", 0), reverse=True)
+    return [
+        {
+            "date": transaction.get("Дата платежа", "Неизвестно"),
+            "amount": transaction.get("Сумма платежа", 0),
+            "category": transaction.get("Категория", "Неизвестно"),
+            "description": transaction.get("Описание", "Нет описания"),
+        }
+        for transaction in sorted_transactions[:top_n]
+    ]
+
+def get_currency_rates():
+    """
+    Получает текущие курсы валют (USD, EUR -> RUB).
+    """
+    currencies = ["USD", "EUR"]
+    return [{"currency": cur, "rate": get_exchange_rate(cur)} for cur in currencies]
+
+def get_stock_prices():
+    """
+    Заглушка для получения цен акций.
+    """
+    return [
+        {"stock": "AAPL", "price": 150.12},
+        {"stock": "AMZN", "price": 3173.18},
+        {"stock": "GOOGL", "price": 2742.39},
+        {"stock": "MSFT", "price": 296.71},
+        {"stock": "TSLA", "price": 1007.08},
+    ]
+
+def generate_main_page(date_str):
+    """
+    Формирует JSON-ответ для главной страницы.
+    :param date_str: строка с датой и временем в формате "YYYY-MM-DD HH:MM:SS"
+    :return: JSON-объект
+    """
+    now = datetime.datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S")
+
+    if 5 <= now.hour < 12:
+        greeting = "Доброе утро"
+    elif 12 <= now.hour < 18:
+        greeting = "Добрый день"
+    elif 18 <= now.hour < 22:
+        greeting = "Добрый вечер"
+    else:
+        greeting = "Доброй ночи"
+
+    transactions = read_excel_transactions(TRANSACTIONS_FILE)
+
+    return json.dumps({
+        "greeting": greeting,
+        "cards": get_financial_summary(transactions),
+        "top_transactions": get_top_transactions(transactions),
+        "currency_rates": get_currency_rates(),
+        "stock_prices": get_stock_prices(),
+    }, ensure_ascii=False, indent=4)
+
+if __name__ == "__main__":
+    print(generate_main_page(datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
