@@ -1,52 +1,20 @@
-import requests
-import json
+import os
+from dotenv import load_dotenv
+from external_api import get_exchange_rate  # Импортируем функцию получения курса валют
 
-API_KEY = "Q2Q5KznEkjKACyQwlNdeb1nptrGML5wu"  # Замени на свой API-ключ
-BASE_URL = "https://api.apilayer.com/exchangerates_data/latest"
+# Загружаем переменные окружения
+load_dotenv()
 
+# Проверяем, загружен ли API-ключ
+API_KEY = os.getenv("EXCHANGE_API_KEY")
+print(f"API_KEY загружен? {'ДА' if API_KEY else 'НЕТ'}")
 
-def get_exchange_rate(currency: str) -> float:
-    """Получает курс валюты по отношению к рублю (RUB)"""
-    url = f"{BASE_URL}?base={currency}&symbols=RUB"
-    headers = {"apikey": API_KEY}
-
-    response = requests.get(url, headers=headers)
-    data = response.json()
-
-    if response.status_code != 200 or "error" in data:
-        raise ValueError(f"Ошибка при получении курса: {data}")
-
-    rate = data["rates"].get("RUB")
-    if rate is None:
-        raise ValueError(f"Не удалось получить курс для {currency}")
-
-    return rate
-
-
-def convert_transactions_to_rub(transactions):
-    """Конвертирует суммы транзакций в рубли"""
-    converted_transactions = []
-
-    for transaction in transactions:
-        amount = transaction["amount"]
-        currency = transaction["currency"]
-
-        if currency != "RUB":
-            exchange_rate = get_exchange_rate(currency)
-            amount *= exchange_rate  # Пересчитываем в рубли
-
-        transaction["amount_rub"] = round(amount, 2)  # Добавляем пересчитанную сумму
-        converted_transactions.append(transaction)
-
-    return converted_transactions
-
-
-# Пример использования
-transactions = [
-    {"id": 1, "amount": 100.0, "currency": "USD", "date": "2024-02-01"},
-    {"id": 2, "amount": 200.0, "currency": "EUR", "date": "2024-02-02"},
-    {"id": 3, "amount": 5000.0, "currency": "RUB", "date": "2024-02-03"}
-]
-
-converted = convert_transactions_to_rub(transactions)
-print(json.dumps(converted, indent=4, ensure_ascii=False))  # Выводим результат красиво
+# Если API-ключ загружен, получаем и выводим курсы валют
+if API_KEY:
+    try:
+        usd_to_rub = get_exchange_rate("USD")
+        eur_to_rub = get_exchange_rate("EUR")
+        print(f"1 USD = {usd_to_rub:.2f} RUB")
+        print(f"1 EUR = {eur_to_rub:.2f} RUB")
+    except ValueError as e:
+        print(f"Ошибка: {e}")

@@ -2,7 +2,13 @@ import datetime
 import json
 import requests
 from collections import defaultdict
-from src.external_api import get_exchange_rate  # Импортируем нашу функцию получения курса валют
+try:
+    from src.external_api import get_exchange_rate
+except ModuleNotFoundError:
+    import sys
+    import os
+    sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+    from src.external_api import get_exchange_rate
 
 API_STOCKS_URL = "https://api.apilayer.com/marketstack/v1/eod"  # Пример API для акций
 API_KEY = "YOUR_ACCESS_KEY"  # Вставь свой API-ключ
