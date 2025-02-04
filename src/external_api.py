@@ -1,23 +1,46 @@
 import os
-from dotenv import load_dotenv
 import requests
+import logging
+from dotenv import load_dotenv
 
-# Загружаем переменные окружения из .env
+# Настраиваем логгер
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+
+# Загружаем переменные окружения
 load_dotenv()
+API_KEY = os.getenv("EXCHANGE_API_KEY")
+
+if not API_KEY:
+    logger.error("❌ API-ключ не найден! Проверь файл .env")
+    raise ValueError("API-ключ отсутствует. Укажите EXCHANGE_API_KEY в .env файле.")
 
 def get_exchange_rate(currency: str) -> float:
-    """Получает курс валюты к рублю с API."""
-    API_KEY = os.getenv("EXCHANGE_API_KEY")  # Берём ключ из окружения
-    if not API_KEY:
-        raise ValueError("Ошибка: API-ключ не найден!")
+    """
+    Получает курс валюты относительно рубля с API Apilayer.
 
-    URL = f"https://api.apilayer.com/exchangerates_data/latest?base={currency}&symbols=RUB"
+    :param currency: Код валюты (например, 'USD', 'EUR')
+    :return: Курс валюты по отношению к рублю
+    """
+    url = "https://api.apilayer.com/exchangerates_data/latest"
     headers = {"apikey": API_KEY}
+    params = {"base": currency, "symbols": "RUB"}  # Меняем base, чтобы API выдавал USD→RUB, EUR→RUB
 
-    response = requests.get(URL, headers=headers)
-    data = response.json()
+    logger.info("🔍 Отправляем запрос в API: %s", url)
+    logger.info("📌 Заголовки: %s", headers)
+    logger.info("📌 Параметры запроса: %s", params)
 
-    if not data.get("success"):
-        raise ValueError(f"Не удалось получить курс для {currency}. Ответ API: {data}")
+    response = requests.get(url, headers=headers, params=params)
 
-    return data["rates"]["RUB"]
+    try:
+        data = response.json()
+        logger.info("📩 Ответ API: %s", data)
+
+        if not data.get("success") or "rates" not in data:
+            raise ValueError(f"Ошибка API: {response.status_code} - {data}")
+
+        return float(data["rates"]["RUB"])  # Получаем курс RUB
+
+    except requests.exceptions.RequestException as e:
+        logger.error("❌ Ошибка при запросе к API: %s", e)
+        raise

@@ -1,20 +1,16 @@
 import pandas as pd
 import logging
 
-# Настроим логирование
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+logger = logging.getLogger(__name__)
 
-def read_excel_transactions(filepath: str):
+def read_excel_transactions(filepath: str) -> pd.DataFrame:
     """
-    Читает данные о транзакциях из Excel-файла.
-    :param filepath: Путь к файлу .xlsx
-    :return: Список словарей с транзакциями
+    Загружает данные о транзакциях из Excel-файла.
     """
     try:
-        df = pd.read_excel(filepath, engine="openpyxl")
-        transactions = df.to_dict(orient="records")  # Преобразуем в список словарей
-        logging.info(f"Файл {filepath} успешно загружен. Найдено {len(transactions)} записей.")
-        return transactions
+        df = pd.read_excel(filepath)
+        logger.info(f"✅ Файл {filepath} успешно загружен. Найдено {len(df)} записей.")
+        return df
     except Exception as e:
-        logging.error(f"Ошибка при загрузке {filepath}: {e}")
-        return []
+        logger.error(f"❌ Ошибка при загрузке {filepath}: {e}")
+        return pd.DataFrame()

@@ -1,109 +1,57 @@
+import pandas as pd
+import json
 import datetime
 import logging
-import json
-from utils import read_excel_transactions
-from external_api import get_exchange_rate
+from src.utils import read_excel_transactions
+from src.external_api import get_exchange_rate
 
-# Настроим логирование
+# Настраиваем логгер
+logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
-# Пути к файлам
-TRANSACTIONS_FILE = "data/operations.xlsx"
-
-def get_financial_summary(transactions):
+def get_financial_summary(transactions: pd.DataFrame):
     """
-    Генерирует сводку по финансам (сумма расходов и кешбэк) по последним 4 цифрам карт.
+    Генерирует список данных о картах (последние 4 цифры, общая сумма трат, кешбэк).
     """
-    summary = {}
+    summary = transactions.groupby("Номер карты").agg({"Сумма операции": "sum", "Кэшбэк": "sum"}).reset_index()
 
-    for transaction in transactions:
-        card = transaction.get("Номер карты", "")
-        amount = transaction.get("Сумма платежа", 0)
+    # Обрабатываем пустые значения
+    summary["Номер карты"] = summary["Номер карты"].fillna("Неизвестная карта")  # Заменяем NaN
+    summary["last_digits"] = summary["Номер карты"].astype(str).str[-4:]  # Берём последние 4 цифры
+    summary["cashback"] = summary["Кэшбэк"].fillna(0).round(2)  # Убеждаемся, что кешбэк не NaN
 
-        if not isinstance(card, str):
-            card = str(card)
+    logger.info("📊 Анализ кешбэка:\n%s", summary[["Номер карты", "Сумма операции", "Кэшбэк"]].head(10))
 
-        last_digits = card[-4:] if len(card) >= 4 else "XXXX"
+    return summary[["last_digits", "Сумма операции", "cashback"]].rename(
+        columns={"Сумма операции": "total_spent"}
+    ).to_dict(orient="records")
 
-        # Игнорируем возвраты и нулевые платежи
-        if amount <= 0:
-            continue
-
-        if last_digits not in summary:
-            summary[last_digits] = {"total_spent": 0, "cashback": 0}
-
-        summary[last_digits]["total_spent"] += amount
-        summary[last_digits]["cashback"] += amount * 0.01  # 1% кешбэк
-
-    return [
-        {
-            "last_digits": card if card != "XXXX" else "Неизвестная карта",
-            "total_spent": round(data["total_spent"], 2),
-            "cashback": round(data["cashback"], 2),
-        }
-        for card, data in summary.items()
-    ]
-
-def get_top_transactions(transactions, top_n=5):
+def generate_main_page(current_datetime: str):
     """
-    Возвращает топ-N транзакций по сумме.
+    Генерирует JSON-ответ для главной страницы.
     """
-    sorted_transactions = sorted(transactions, key=lambda x: x.get("Сумма платежа", 0), reverse=True)
-    return [
-        {
-            "date": transaction.get("Дата платежа", "Неизвестно"),
-            "amount": transaction.get("Сумма платежа", 0),
-            "category": transaction.get("Категория", "Неизвестно"),
-            "description": transaction.get("Описание", "Нет описания"),
-        }
-        for transaction in sorted_transactions[:top_n]
-    ]
+    transactions = read_excel_transactions("data/operations.xlsx")
 
-def get_currency_rates():
-    """
-    Получает текущие курсы валют (USD, EUR -> RUB).
-    """
-    currencies = ["USD", "EUR"]
-    return [{"currency": cur, "rate": get_exchange_rate(cur)} for cur in currencies]
+    # Получаем курс валют
+    usd_rate = get_exchange_rate("USD")
+    eur_rate = get_exchange_rate("EUR")
 
-def get_stock_prices():
-    """
-    Заглушка для получения цен акций.
-    """
-    return [
-        {"stock": "AAPL", "price": 150.12},
-        {"stock": "AMZN", "price": 3173.18},
-        {"stock": "GOOGL", "price": 2742.39},
-        {"stock": "MSFT", "price": 296.71},
-        {"stock": "TSLA", "price": 1007.08},
-    ]
-
-def generate_main_page(date_str):
-    """
-    Формирует JSON-ответ для главной страницы.
-    :param date_str: строка с датой и временем в формате "YYYY-MM-DD HH:MM:SS"
-    :return: JSON-объект
-    """
-    now = datetime.datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S")
-
-    if 5 <= now.hour < 12:
-        greeting = "Доброе утро"
-    elif 12 <= now.hour < 18:
-        greeting = "Добрый день"
-    elif 18 <= now.hour < 22:
-        greeting = "Добрый вечер"
-    else:
+    # Приветствие в зависимости от времени суток
+    hour = datetime.datetime.strptime(current_datetime, "%Y-%m-%d %H:%M:%S").hour
+    if hour < 6:
         greeting = "Доброй ночи"
-
-    transactions = read_excel_transactions(TRANSACTIONS_FILE)
+    elif hour < 12:
+        greeting = "Доброе утро"
+    elif hour < 18:
+        greeting = "Добрый день"
+    else:
+        greeting = "Добрый вечер"
 
     return json.dumps({
         "greeting": greeting,
         "cards": get_financial_summary(transactions),
-        "top_transactions": get_top_transactions(transactions),
-        "currency_rates": get_currency_rates(),
-        "stock_prices": get_stock_prices(),
+        "top_transactions": transactions.nlargest(5, "Сумма операции")[["Дата операции", "Сумма операции", "Категория", "Описание"]].rename(
+            columns={"Дата операции": "date", "Сумма операции": "amount", "Категория": "category", "Описание": "description"}
+        ).to_dict(orient="records"),
+        "currency_rates": [{"currency": "USD", "rate": usd_rate}, {"currency": "EUR", "rate": eur_rate}]
     }, ensure_ascii=False, indent=4)
-
-if __name__ == "__main__":
-    print(generate_main_page(datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")))

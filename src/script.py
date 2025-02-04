@@ -1,20 +1,12 @@
-import os
-from dotenv import load_dotenv
-from external_api import get_exchange_rate  # Импортируем функцию получения курса валют
+import datetime
+import logging
+from src.views import generate_main_page
 
-# Загружаем переменные окружения
-load_dotenv()
+# Настраиваем логгер
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
-# Проверяем, загружен ли API-ключ
-API_KEY = os.getenv("EXCHANGE_API_KEY")
-print(f"API_KEY загружен? {'ДА' if API_KEY else 'НЕТ'}")
-
-# Если API-ключ загружен, получаем и выводим курсы валют
-if API_KEY:
-    try:
-        usd_to_rub = get_exchange_rate("USD")
-        eur_to_rub = get_exchange_rate("EUR")
-        print(f"1 USD = {usd_to_rub:.2f} RUB")
-        print(f"1 EUR = {eur_to_rub:.2f} RUB")
-    except ValueError as e:
-        print(f"Ошибка: {e}")
+if __name__ == "__main__":
+    logger.info("🚀 Запуск приложения...")
+    json_output = generate_main_page(datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+    print(json_output)
