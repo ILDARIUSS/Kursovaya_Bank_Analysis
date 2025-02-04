@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 def main():
     logger.info("🚀 Запуск приложения...")
 
-    # Загружаем операции
+    # Загружаем  операции
     transactions = read_excel_transactions("data/operations.xlsx")
     if transactions.empty:
         logger.warning("⚠️ Нет данных для анализа транзакций!")
