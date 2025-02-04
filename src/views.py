@@ -1,81 +1,74 @@
 import pandas as pd
-import datetime
 import logging
 from src.utils import read_excel_transactions
 from src.external_api import get_exchange_rate
+import datetime
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
 
-def get_financial_summary(transactions):
-    """Группировка транзакций по картам."""
-    if transactions.empty:
-        logger.warning("⚠️ Нет данных для анализа транзакций!")
-        return []
-
-    summary = transactions.groupby("Номер карты").agg({"Сумма операции": "sum", "Кэшбэк": "sum"}).reset_index()
-
-    summary["total_spent"] = summary["Сумма операции"].fillna(0).round(2)
-    summary["cashback"] = summary["Кэшбэк"].fillna(0).round(2)
-    summary["last_digits"] = summary["Номер карты"].astype(str).str[-4:]
-
-    logger.info("📊 Анализ кешбэка:\n%s", summary[["Номер карты", "Сумма операции", "Кэшбэк"]].head(10))
-
-    return summary[["last_digits", "total_spent", "cashback"]].to_dict(orient="records")
-
-
-def generate_main_page(current_time):
-    """Генерация JSON-структуры главной страницы."""
+def generate_main_page(current_time: str):
+    """
+    Генерирует JSON-данные для главной страницы
+    """
     logger.info("🚀 Генерация главной страницы...")
 
+    # Загружаем транзакции
     transactions = read_excel_transactions("data/operations.xlsx")
 
-    if transactions.empty:
-        logger.warning("⚠️ Нет данных для анализа!")
-        return {"greeting": "Нет данных", "cards": [], "top_transactions": [], "currency_rates": []}
+    # Преобразуем дату в datetime
+    transactions["Дата операции"] = pd.to_datetime(transactions["Дата операции"], errors="coerce")
 
-    # Преобразуем даты
-    transactions["Дата операции"] = pd.to_datetime(transactions["Дата операции"], format="%d.%m.%Y %H:%M:%S",
-                                                   errors="coerce")
+    # Определяем диапазон дат (последние 30 дней)
+    target_date = pd.to_datetime(current_time)
+    start_date = target_date - pd.Timedelta(days=30)
 
-    target_date = datetime.datetime.strptime(current_time, "%Y-%m-%d %H:%M:%S").date()
-    start_date = target_date - datetime.timedelta(days=30)
+    logger.info("📅 Фильтрация по датам: %s - %s", start_date.date(), target_date.date())
 
-    logger.info(f"📅 Фильтрация по датам: {start_date} - {target_date}")
-
+    # Фильтруем транзакции за последние 30 дней
     filtered_transactions = transactions[
-        (transactions["Дата операции"].dt.date >= start_date) &
-        (transactions["Дата операции"].dt.date <= target_date)
+        (transactions["Дата операции"] >= start_date) & (transactions["Дата операции"] <= target_date)
         ]
 
     if filtered_transactions.empty:
         logger.warning("⚠️ Нет транзакций за последние 30 дней! Берём все данные.")
         filtered_transactions = transactions
 
-    logger.info(f"✅ После фильтрации осталось записей: {len(filtered_transactions)}")
+    logger.info("✅ После фильтрации осталось записей: %d", len(filtered_transactions))
 
-    cards_summary = get_financial_summary(filtered_transactions)
+    # Группировка по картам
+    financial_summary = (
+        filtered_transactions.groupby("Номер карты")
+        .agg({"Сумма операции": "sum", "Кэшбэк": "sum"})
+        .reset_index()
+    )
 
-    # Преобразуем дату в строку
-    top_transactions = filtered_transactions.nlargest(5, "Сумма операции")[
-        ["Дата операции", "Сумма операции", "Категория", "Описание"]
-    ]
-    top_transactions["Дата операции"] = top_transactions["Дата операции"].dt.strftime("%Y-%m-%d %H:%M:%S")
+    financial_summary["Номер карты"] = financial_summary["Номер карты"].astype(str).str[-4:].apply(lambda x: f"*{x}")
+    financial_summary = financial_summary.rename(columns={"Сумма операции": "total_spent", "Кэшбэк": "cashback"})
 
-    top_transactions = top_transactions.rename(
-        columns={"Дата операции": "date", "Сумма операции": "amount", "Категория": "category",
-                 "Описание": "description"}).to_dict(orient="records")
+    logger.info("📊 Анализ кешбэка:\n%s", financial_summary.head(10))
 
-    usd_rate = get_exchange_rate("USD")
-    eur_rate = get_exchange_rate("EUR")
+    # 📌 **Новый отчёт: Траты по дням недели**
+    filtered_transactions["День недели"] = filtered_transactions["Дата операции"].dt.day_name()
+    spending_by_weekday = (
+        filtered_transactions.groupby("День недели")["Сумма операции"].sum().round(2).to_dict()
+    )
 
+    logger.info("📅 Траты по дням недели:\n%s", spending_by_weekday)
+
+    # Курс валют
+    usd_rate = round(get_exchange_rate("USD"), 2)
+    eur_rate = round(get_exchange_rate("EUR"), 2)
+
+    # Финальный JSON-объект
     return {
-        "greeting": "Доброе утро",
-        "cards": cards_summary,
-        "top_transactions": top_transactions,
+        "greeting": "Доброе утро" if target_date.hour < 12 else "Добрый день",
+        "cards": financial_summary.to_dict(orient="records"),
         "currency_rates": [
-            {"currency": "USD", "rate": round(usd_rate, 2)},
-            {"currency": "EUR", "rate": round(eur_rate, 2)}
-        ]
+            {"currency": "USD", "rate": usd_rate},
+            {"currency": "EUR", "rate": eur_rate},
+        ],
+        "reports": {  # 🔥 Добавляем отчёты сюда
+            "spending_by_weekday": spending_by_weekday
+        }
     }
