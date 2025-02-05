@@ -1,74 +1,65 @@
 import pandas as pd
+import datetime
 import logging
 from src.utils import read_excel_transactions
 from src.external_api import get_exchange_rate
-import datetime
 
 logger = logging.getLogger(__name__)
 
-
-def generate_main_page(current_time: str):
-    """
-    Генерирует JSON-данные для главной страницы
-    """
+def generate_main_page(current_time):
     logger.info("🚀 Генерация главной страницы...")
 
-    # Загружаем транзакции
+    # Читаем данные
     transactions = read_excel_transactions("data/operations.xlsx")
 
-    # Преобразуем дату в datetime
-    transactions["Дата операции"] = pd.to_datetime(transactions["Дата операции"], errors="coerce")
+    # Преобразуем дату операции в datetime, добавляем `dayfirst=True`
+    transactions["Дата операции"] = pd.to_datetime(
+        transactions["Дата операции"], format="%d.%m.%Y %H:%M:%S", dayfirst=True, errors="coerce"
+    )
 
     # Определяем диапазон дат (последние 30 дней)
-    target_date = pd.to_datetime(current_time)
-    start_date = target_date - pd.Timedelta(days=30)
-
-    logger.info("📅 Фильтрация по датам: %s - %s", start_date.date(), target_date.date())
+    target_date = datetime.date.today()
+    start_date = target_date - datetime.timedelta(days=30)
+    logger.info("📅 Фильтрация по датам: %s - %s", start_date, target_date)
 
     # Фильтруем транзакции за последние 30 дней
-    filtered_transactions = transactions[
-        (transactions["Дата операции"] >= start_date) & (transactions["Дата операции"] <= target_date)
-        ]
+    recent_transactions = transactions[
+        (transactions["Дата операции"].dt.date >= start_date) &
+        (transactions["Дата операции"].dt.date <= target_date)
+    ]
 
-    if filtered_transactions.empty:
+    if recent_transactions.empty:
         logger.warning("⚠️ Нет транзакций за последние 30 дней! Берём все данные.")
-        filtered_transactions = transactions
+        recent_transactions = transactions
 
-    logger.info("✅ После фильтрации осталось записей: %d", len(filtered_transactions))
+    logger.info("✅ После фильтрации осталось записей: %d", len(recent_transactions))
 
-    # Группировка по картам
-    financial_summary = (
-        filtered_transactions.groupby("Номер карты")
-        .agg({"Сумма операции": "sum", "Кэшбэк": "sum"})
-        .reset_index()
-    )
+    # Анализ кешбэка
+    cashback_summary = recent_transactions.groupby("Номер карты").agg(
+        total_spent=pd.NamedAgg(column="Сумма операции", aggfunc="sum"),
+        cashback=pd.NamedAgg(column="Кэшбэк", aggfunc="sum")
+    ).reset_index()
 
-    financial_summary["Номер карты"] = financial_summary["Номер карты"].astype(str).str[-4:].apply(lambda x: f"*{x}")
-    financial_summary = financial_summary.rename(columns={"Сумма операции": "total_spent", "Кэшбэк": "cashback"})
+    cashback_summary["cashback"] = cashback_summary["cashback"].fillna(0).round(2)
+    logger.info("📊 Анализ кешбэка:\n%s", cashback_summary)
 
-    logger.info("📊 Анализ кешбэка:\n%s", financial_summary.head(10))
-
-    # 📌 **Новый отчёт: Траты по дням недели**
-    filtered_transactions["День недели"] = filtered_transactions["Дата операции"].dt.day_name()
-    spending_by_weekday = (
-        filtered_transactions.groupby("День недели")["Сумма операции"].sum().round(2).to_dict()
-    )
-
+    # Анализ трат по дням недели
+    transactions["День недели"] = transactions["Дата операции"].dt.day_name()
+    spending_by_weekday = transactions.groupby("День недели")["Сумма операции"].sum().to_dict()
     logger.info("📅 Траты по дням недели:\n%s", spending_by_weekday)
 
-    # Курс валют
-    usd_rate = round(get_exchange_rate("USD"), 2)
-    eur_rate = round(get_exchange_rate("EUR"), 2)
+    # Получаем курсы валют
+    currency_rates = [
+        {"currency": "USD", "rate": get_exchange_rate("USD")},
+        {"currency": "EUR", "rate": get_exchange_rate("EUR")}
+    ]
+    logger.info("💰 Курс валют: %s", currency_rates)
 
-    # Финальный JSON-объект
     return {
-        "greeting": "Доброе утро" if target_date.hour < 12 else "Добрый день",
-        "cards": financial_summary.to_dict(orient="records"),
-        "currency_rates": [
-            {"currency": "USD", "rate": usd_rate},
-            {"currency": "EUR", "rate": eur_rate},
-        ],
-        "reports": {  # 🔥 Добавляем отчёты сюда
+        "greeting": "Доброе утро",
+        "cards": cashback_summary.to_dict(orient="records"),
+        "currency_rates": currency_rates,
+        "reports": {
             "spending_by_weekday": spending_by_weekday
         }
     }
