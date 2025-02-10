@@ -1,28 +1,32 @@
-import pandas as pd
-import time
 import logging
+import pandas as pd
+import datetime
 
-logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-def log_execution_time(func):
-    """Декоратор для логирования времени выполнения функции."""
-    def wrapper(*args, **kwargs):
-        start_time = time.time()
-        result = func(*args, **kwargs)
-        elapsed_time = time.time() - start_time
-        logging.info(f"⏳ Время выполнения {func.__name__}: {elapsed_time:.4f} сек")
-        return result
-    return wrapper
 
-@log_execution_time
-def generate_reports(transactions: pd.DataFrame):
-    """Генерирует отчёт о тратах по дням недели."""
-    if transactions.empty:
-        logging.warning("⚠️ Нет данных для генерации отчёта!")
-        return {}
+def generate_reports(transactions, report_date):
+    if isinstance(report_date, str):
+        report_date = datetime.datetime.strptime(report_date, "%Y-%m-%d")
 
-    transactions["День недели"] = transactions["Дата операции"].dt.day_name()
-    spending_by_weekday = transactions.groupby("День недели")["Сумма операции"].sum().to_dict()
+    logger.info(f"📊 Генерация отчёта с датой: {report_date.strftime('%Y-%m-%d')}")
 
-    logging.info(f"📅 Траты по дням недели:\n{spending_by_weekday}")
+    # Выборка за последние 3 месяца
+    start_date = report_date - pd.DateOffset(months=3)
+    logger.info(f"📅 Выборка данных с {start_date.strftime('%Y-%m-%d')} по {report_date.strftime('%Y-%m-%d')}")
+
+    filtered_data = transactions[
+        (transactions["Дата операции"] >= start_date) &
+        (transactions["Дата операции"] <= report_date)
+        ]
+
+    if filtered_data.empty:
+        logger.warning("⚠️ Нет данных за выбранный период!")
+        return {"spending_by_weekday": {}}
+
+    spending_by_weekday = filtered_data.groupby(filtered_data["Дата операции"].dt.strftime("%A"))[
+        "Сумма операции"].sum().to_dict()
+
+    logger.info(f"📊 Траты по дням недели: {spending_by_weekday}")
+
     return {"spending_by_weekday": spending_by_weekday}

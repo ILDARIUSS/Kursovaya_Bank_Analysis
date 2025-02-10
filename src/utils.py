@@ -1,16 +1,29 @@
 import pandas as pd
 import logging
 
-logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
-def read_excel_transactions(filepath: str) -> pd.DataFrame:
+def load_transactions(filepath: str) -> pd.DataFrame:
     """
-    Загружает данные о транзакциях из Excel-файла.
+    Загружает транзакции из Excel-файла и приводит данные к нужному формату.
+
+    :param filepath: Путь к файлу Excel.
+    :return: DataFrame с транзакциями.
     """
-    try:
-        df = pd.read_excel(filepath)
-        logger.info(f"✅ Файл {filepath} успешно загружен. Найдено {len(df)} записей.")
-        return df
-    except Exception as e:
-        logger.error(f"❌ Ошибка при загрузке {filepath}: {e}")
-        return pd.DataFrame()
+    logging.info(f"✅ Файл {filepath} загружается...")
+
+    df = pd.read_excel(filepath)
+
+    # Приводим названия колонок к единому формату
+    df.columns = df.columns.str.strip()
+
+    # Приводим дату операции к формату datetime
+    if "Дата операции" in df.columns:
+        df["Дата операции"] = pd.to_datetime(df["Дата операции"], errors="coerce")
+
+    # Заполняем пропущенные значения
+    df.fillna("", inplace=True)
+
+    logging.info(f"✅ Загружено {len(df)} записей.")
+
+    return df
