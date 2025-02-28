@@ -1,36 +1,29 @@
-import pandas as pd
+import datetime
 import logging
+from typing import List, Dict
 
 logger = logging.getLogger(__name__)
 
-def process_transactions(transactions, month, year):
-    logger.info(f"📊 Анализ транзакций за {month:02d}-{year}")
 
-    # Проверяем, что даты в правильном формате
-    transactions["Дата операции"] = pd.to_datetime(transactions["Дата операции"], errors="coerce")
+def process_transactions(transactions: List[Dict], month: int, year: int) -> List[Dict]:
+    """Анализирует транзакции за указанный месяц и год.
 
-    # Убираем NaT
-    transactions = transactions.dropna(subset=["Дата операции"])
+    Args:
+        transactions (List[Dict]): Список транзакций.
+        month (int): Месяц анализа.
+        year (int): Год анализа.
 
-    # Выбираем транзакции за указанный месяц и год
-    filtered_transactions = transactions[
-        (transactions["Дата операции"].dt.month == month) &
-        (transactions["Дата операции"].dt.year == year)
+    Returns:
+        List[Dict]: Отфильтрованный список транзакций.
+    """
+    filtered = [
+        txn for txn in transactions
+        if datetime.datetime.strptime(txn["Дата операции"], "%Y-%m-%dT%H:%M:%S").month == month and
+           datetime.datetime.strptime(txn["Дата операции"], "%Y-%m-%dT%H:%M:%S").year == year
     ]
 
-    # Логируем диапазон дат в файле
-    min_date = transactions["Дата операции"].min().strftime("%Y-%m-%dT%H:%M:%S")
-    max_date = transactions["Дата операции"].max().strftime("%Y-%m-%dT%H:%M:%S")
-    logger.info(f"📅 Даты в файле: {min_date} - {max_date}")
-
-    if filtered_transactions.empty:
+    logger.info(f"📅 Даты в файле: {transactions[0]['Дата операции']} - {transactions[-1]['Дата операции']}")
+    if not filtered:
         logger.warning("⚠️ Нет транзакций за указанный период!")
-        return {"transactions": []}
 
-    # Конвертируем даты в JSON-совместимый формат
-    filtered_transactions.loc[:, "Дата операции"] = filtered_transactions["Дата операции"].dt.strftime(
-        "%Y-%m-%dT%H:%M:%S")
-
-    return {
-        "transactions": filtered_transactions.to_dict(orient="records")
-    }
+    return filtered

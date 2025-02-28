@@ -1,38 +1,112 @@
-import pandas as pd
+import datetime
+import json
 import logging
+import pandas as pd
+import requests
+from typing import Dict, List
 
 logger = logging.getLogger(__name__)
 
-def generate_main_page(transactions, current_time):
-    logger.info("🚀 Генерация главной страницы...")
+API_EXCHANGE_RATES = "https://api.apilayer.com/exchangerates_data/latest"
+API_STOCK_PRICES = "https://finnhub.io/api/v1/quote"
 
-    # Преобразуем столбец в datetime (с обработкой ошибок)
+
+def get_greeting(current_time: datetime.datetime) -> str:
+    """Возвращает приветствие в зависимости от текущего времени суток."""
+    hour = current_time.hour
+    if 5 <= hour < 12:
+        return "Доброе утро"
+    elif 12 <= hour < 18:
+        return "Добрый день"
+    elif 18 <= hour < 23:
+        return "Добрый вечер"
+    else:
+        return "Доброй ночи"
+
+
+def fetch_exchange_rates(currencies: List[str]) -> List[Dict]:
+    """Получает курсы валют к рублю."""
+    api_key = "your_api_key_here"  # Заменить на реальный ключ
+    headers = {"apikey": api_key}
+    params = {"base": "RUB", "symbols": ",".join(currencies)}
+
+    response = requests.get(API_EXCHANGE_RATES, headers=headers, params=params)
+    if response.status_code == 200:
+        data = response.json()
+        return [{"currency": cur, "rate": data["rates"].get(cur, None)} for cur in currencies]
+    else:
+        logger.warning(f"Ошибка при получении курсов валют: {response.status_code}")
+        return []
+
+
+def fetch_stock_prices(stocks: List[str]) -> List[Dict]:
+    """Получает стоимость акций."""
+    api_key = "your_api_key_here"  # Заменить на реальный ключ
+    stock_prices = []
+
+    for stock in stocks:
+        params = {"symbol": stock, "token": api_key}
+        response = requests.get(API_STOCK_PRICES, params=params)
+        if response.status_code == 200:
+            data = response.json()
+            stock_prices.append({"stock": stock, "price": data.get("c", None)})
+        else:
+            logger.warning(f"Ошибка при получении цены акции {stock}: {response.status_code}")
+
+    return stock_prices
+
+
+def generate_main_page(transactions: pd.DataFrame, current_time: str) -> Dict:
+    """Генерирует данные для главной страницы."""
+    current_time = datetime.datetime.strptime(current_time, "%Y-%m-%d %H:%M:%S")
+    start_date = current_time.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
     transactions["Дата операции"] = pd.to_datetime(transactions["Дата операции"], errors="coerce")
-
-    # Убираем строки с NaT (если не удалось распарсить дату)
-    transactions = transactions.dropna(subset=["Дата операции"])
-
-    # Преобразуем даты в ISO-формат для JSON
-    transactions["Дата операции"] = transactions["Дата операции"].dt.strftime("%Y-%m-%dT%H:%M:%S")
-
-    start_date = pd.to_datetime(current_time).replace(day=1)
-
-    # Фильтрация по дате
     filtered_transactions = transactions[
-        (transactions["Дата операции"] >= start_date.strftime("%Y-%m-%dT%H:%M:%S")) &
+        (transactions["Дата операции"] >= start_date) &
         (transactions["Дата операции"] <= current_time)
-    ]
-
-    logger.info(f"📅 Фильтрация по датам: {start_date} - {current_time}")
+        ]
 
     if filtered_transactions.empty:
         logger.warning("⚠️ Нет транзакций за выбранный период!")
-        return {"greeting": "Доброе утро", "transactions": []}
+        return {"greeting": get_greeting(current_time), "transactions": []}
 
-    # Формируем JSON-ответ
-    transactions_list = filtered_transactions.to_dict(orient="records")
+    # Анализ трат по картам
+    cards_summary = filtered_transactions.groupby("Номер карты").agg(
+        total_spent=pd.NamedAgg(column="Сумма операции", aggfunc="sum"),
+        cashback=pd.NamedAgg(column="Сумма операции", aggfunc=lambda x: round(abs(x.sum()) * 0.01, 2))
+    ).reset_index()
+
+    cards_summary["Номер карты"] = cards_summary["Номер карты"].astype(str).str[-4:]
+
+    cards = cards_summary.to_dict(orient="records")
+
+    # Топ-5 транзакций по сумме платежа
+    top_transactions = filtered_transactions.nlargest(5, "Сумма операции")[
+        ["Дата операции", "Сумма операции", "Категория", "Описание"]]
+    top_transactions["Дата операции"] = top_transactions["Дата операции"].dt.strftime("%d.%m.%Y")
+    top_transactions.rename(columns={"Дата операции": "date", "Сумма операции": "amount", "Категория": "category",
+                                     "Описание": "description"}, inplace=True)
+    top_transactions = top_transactions.to_dict(orient="records")
+
+    # Загрузка user_settings.json
+    try:
+        with open("user_settings.json", "r", encoding="utf-8") as file:
+            user_settings = json.load(file)
+        currencies = user_settings.get("user_currencies", [])
+        stocks = user_settings.get("user_stocks", [])
+    except (FileNotFoundError, json.JSONDecodeError) as e:
+        logger.warning(f"⚠️ Ошибка при загрузке user_settings.json: {e}")
+        currencies, stocks = [], []
+
+    # Получение курсов валют и цен акций
+    currency_rates = fetch_exchange_rates(currencies) if currencies else []
+    stock_prices = fetch_stock_prices(stocks) if stocks else []
 
     return {
-        "greeting": "Доброе утро",
-        "transactions": transactions_list
+        "greeting": get_greeting(current_time),
+        "cards": cards,
+        "top_transactions": top_transactions,
+        "currency_rates": currency_rates,
+        "stock_prices": stock_prices
     }

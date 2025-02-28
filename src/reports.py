@@ -1,32 +1,44 @@
+import datetime
 import logging
 import pandas as pd
-import datetime
+from functools import wraps
 
 logger = logging.getLogger(__name__)
 
+def log_execution(func):
+    """Декоратор, логирующий выполнение функции."""
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        logger.info(f"Выполнение {func.__name__} с аргументами: {args}, {kwargs}")
+        result = func(*args, **kwargs)
+        return result
+    return wrapper
 
-def generate_reports(transactions, report_date):
-    if isinstance(report_date, str):
-        report_date = datetime.datetime.strptime(report_date, "%Y-%m-%d")
+@log_execution
+def generate_reports(transactions: pd.DataFrame, report_date: str = None) -> pd.DataFrame:
+    """Генерирует отчет по тратам за последние 3 месяца.
+
+    Args:
+        transactions (pd.DataFrame): Датафрейм с транзакциями.
+        report_date (str, optional): Дата отсчета (формат YYYY-MM-DD). Если не передана, используется текущая.
+
+    Returns:
+        pd.DataFrame: Средние траты по дням недели.
+    """
+    report_date = datetime.datetime.strptime(report_date, "%Y-%m-%d") if report_date else datetime.datetime.now()
+    start_date = report_date - pd.DateOffset(months=3)
 
     logger.info(f"📊 Генерация отчёта с датой: {report_date.strftime('%Y-%m-%d')}")
-
-    # Выборка за последние 3 месяца
-    start_date = report_date - pd.DateOffset(months=3)
     logger.info(f"📅 Выборка данных с {start_date.strftime('%Y-%m-%d')} по {report_date.strftime('%Y-%m-%d')}")
 
-    filtered_data = transactions[
-        (transactions["Дата операции"] >= start_date) &
-        (transactions["Дата операции"] <= report_date)
-        ]
+    transactions["Дата операции"] = pd.to_datetime(transactions["Дата операции"], errors="coerce")
+    filtered = transactions[(transactions["Дата операции"] >= start_date) & (transactions["Дата операции"] <= report_date)]
 
-    if filtered_data.empty:
+    if filtered.empty:
         logger.warning("⚠️ Нет данных за выбранный период!")
-        return {"spending_by_weekday": {}}
+        return pd.DataFrame(columns=["День недели", "Средние траты"])
 
-    spending_by_weekday = filtered_data.groupby(filtered_data["Дата операции"].dt.strftime("%A"))[
-        "Сумма операции"].sum().to_dict()
+    spending_by_weekday = filtered.groupby(filtered["Дата операции"].dt.day_name())["Сумма операции"].mean().reset_index()
+    spending_by_weekday.columns = ["День недели", "Средние траты"]
 
-    logger.info(f"📊 Траты по дням недели: {spending_by_weekday}")
-
-    return {"spending_by_weekday": spending_by_weekday}
+    return spending_by_weekday
