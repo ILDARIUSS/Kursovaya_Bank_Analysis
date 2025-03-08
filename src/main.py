@@ -17,7 +17,7 @@ def main():
 
     # Генерация главной страницы
     logging.info("📊 Генерация главной страницы...")
-    current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    current_time = "2021-12-13 01:02:03"
     main_page_json = generate_main_page(transactions, current_time)
 
     print(json.dumps(main_page_json, indent=4, ensure_ascii=False))

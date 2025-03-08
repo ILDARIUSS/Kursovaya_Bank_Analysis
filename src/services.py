@@ -2,28 +2,30 @@ import datetime
 import logging
 from typing import List, Dict
 
+import pandas as pd
+import re
+
 logger = logging.getLogger(__name__)
 
 
-def process_transactions(transactions: List[Dict], month: int, year: int) -> List[Dict]:
-    """Анализирует транзакции за указанный месяц и год.
+def process_transactions(transactions: List[Dict]) -> List[Dict]:
+    pattern = re.compile(r"\w+\s\w\.")
 
-    Args:
-        transactions (List[Dict]): Список транзакций.
-        month (int): Месяц анализа.
-        year (int): Год анализа.
+    result = []
+    for transaction in transactions:
+        if transaction['Категория'] != 'Переводы':
+            continue
 
-    Returns:
-        List[Dict]: Отфильтрованный список транзакций.
-    """
-    filtered = [
-        txn for txn in transactions
-        if datetime.datetime.strptime(txn["Дата операции"], "%Y-%m-%dT%H:%M:%S").month == month and
-           datetime.datetime.strptime(txn["Дата операции"], "%Y-%m-%dT%H:%M:%S").year == year
-    ]
+        if pattern.match(transaction['Описание']):
+            result.append(transaction)
 
-    logger.info(f"📅 Даты в файле: {transactions[0]['Дата операции']} - {transactions[-1]['Дата операции']}")
-    if not filtered:
-        logger.warning("⚠️ Нет транзакций за указанный период!")
+    return result
 
-    return filtered
+
+
+
+if __name__ == '__main__':
+    df = pd.read_excel('../data/operations.xlsx')
+    data = df.to_dict(orient='records')
+    result = process_transactions(data)
+    print(result)

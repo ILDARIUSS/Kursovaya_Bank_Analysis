@@ -5,16 +5,18 @@ from functools import wraps
 
 logger = logging.getLogger(__name__)
 
-def log_execution(func):
-    """Декоратор, логирующий выполнение функции."""
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        logger.info(f"Выполнение {func.__name__} с аргументами: {args}, {kwargs}")
-        result = func(*args, **kwargs)
-        return result
-    return wrapper
+def log_execution(filename='default.json'):
+    def inner(func):
+        """Декоратор, логирующий выполнение функции."""
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            result = func(*args, **kwargs)
+            result.to_json(filename, force_ascii=False, indent=4)
+            return result
+        return wrapper
+    return inner
 
-@log_execution
+@log_execution('my_report.json')
 def generate_reports(transactions: pd.DataFrame, report_date: str = None) -> pd.DataFrame:
     """Генерирует отчет по тратам за последние 3 месяца.
 
@@ -42,3 +44,8 @@ def generate_reports(transactions: pd.DataFrame, report_date: str = None) -> pd.
     spending_by_weekday.columns = ["День недели", "Средние траты"]
 
     return spending_by_weekday
+
+
+if __name__== '__main__':
+    df = pd.read_excel('../data/operations.xlsx')
+    generate_reports(df, '2021-11-13')

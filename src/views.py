@@ -1,9 +1,14 @@
 import datetime
 import json
 import logging
+import os
+
 import pandas as pd
 import requests
 from typing import Dict, List
+from dotenv import load_dotenv
+
+load_dotenv()
 
 logger = logging.getLogger(__name__)
 
@@ -26,22 +31,26 @@ def get_greeting(current_time: datetime.datetime) -> str:
 
 def fetch_exchange_rates(currencies: List[str]) -> List[Dict]:
     """Получает курсы валют к рублю."""
-    api_key = "your_api_key_here"  # Заменить на реальный ключ
+    api_key = os.getenv('API_EXCHANGE_RATES_KEY')
     headers = {"apikey": api_key}
-    params = {"base": "RUB", "symbols": ",".join(currencies)}
 
-    response = requests.get(API_EXCHANGE_RATES, headers=headers, params=params)
-    if response.status_code == 200:
-        data = response.json()
-        return [{"currency": cur, "rate": data["rates"].get(cur, None)} for cur in currencies]
-    else:
-        logger.warning(f"Ошибка при получении курсов валют: {response.status_code}")
-        return []
+    result = []
+    for currency in currencies:
+        params = {"base": currency, "symbols": "RUB"}
+
+        response = requests.get(API_EXCHANGE_RATES, headers=headers, params=params)
+        if response.status_code == 200:
+            data = response.json()
+            result.append({"currency": currency, "rate": data["rates"].get("RUB", None)})
+        else:
+            logger.warning(f"Ошибка при получении курсов валют: {response.status_code}")
+            return []
+    return result
 
 
 def fetch_stock_prices(stocks: List[str]) -> List[Dict]:
     """Получает стоимость акций."""
-    api_key = "your_api_key_here"  # Заменить на реальный ключ
+    api_key = os.getenv('API_STOCK_PRICES_KEY')
     stock_prices = []
 
     for stock in stocks:
@@ -71,8 +80,9 @@ def generate_main_page(transactions: pd.DataFrame, current_time: str) -> Dict:
         logger.warning("⚠️ Нет транзакций за выбранный период!")
         return {"greeting": get_greeting(current_time), "transactions": []}
 
+    expenses_only = filtered_transactions[filtered_transactions['Сумма операции'] < 0]
     # Анализ трат по картам
-    cards_summary = filtered_transactions.groupby("Номер карты").agg(
+    cards_summary = expenses_only.groupby("Номер карты").agg(
         total_spent=pd.NamedAgg(column="Сумма операции", aggfunc="sum"),
         cashback=pd.NamedAgg(column="Сумма операции", aggfunc=lambda x: round(abs(x.sum()) * 0.01, 2))
     ).reset_index()
@@ -91,7 +101,7 @@ def generate_main_page(transactions: pd.DataFrame, current_time: str) -> Dict:
 
     # Загрузка user_settings.json
     try:
-        with open("user_settings.json", "r", encoding="utf-8") as file:
+        with open("src/user_settings.json", "r", encoding="utf-8") as file:
             user_settings = json.load(file)
         currencies = user_settings.get("user_currencies", [])
         stocks = user_settings.get("user_stocks", [])
@@ -103,8 +113,10 @@ def generate_main_page(transactions: pd.DataFrame, current_time: str) -> Dict:
     currency_rates = fetch_exchange_rates(currencies) if currencies else []
     stock_prices = fetch_stock_prices(stocks) if stocks else []
 
+    now_moment = datetime.datetime.now()
+
     return {
-        "greeting": get_greeting(current_time),
+        "greeting": get_greeting(now_moment),
         "cards": cards,
         "top_transactions": top_transactions,
         "currency_rates": currency_rates,
